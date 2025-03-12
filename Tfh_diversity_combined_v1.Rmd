@@ -802,7 +802,7 @@ for (i in unique(ibsm_rep@meta.data$day)){
 
 ###Reading input
 
-```{r reading DE gene list for CHMI cohort, eval=FALSE, warning=FALSE}
+```{r reading DE gene list for CHMI cohort, warning=FALSE}
 upset0 <-  read.csv(file="/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/psbulk_sigGens_all_DayClusters_080824.csv", row.names = 1)
 
 ##Getting dataset
