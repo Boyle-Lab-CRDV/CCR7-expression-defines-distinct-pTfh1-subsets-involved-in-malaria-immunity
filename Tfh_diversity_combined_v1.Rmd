@@ -1011,7 +1011,7 @@ ha <- HeatmapAnnotation(Cluster=Average.dfsub$seurat_clusters,
                         col = col)
 ```
 ##Figure 5 D \| Expression of top 50 unique upregulated genes for Tfh1_Cyto, Tfh1_CCR7 and Tfh2
-```{r Figure5D, warning=FALSE, include=FALSE, echo=TRUE, fig.height=10, fig.width=6}
+```{r Figure5D, warning=FALSE, include=TRUE, echo=TRUE, fig.height=10, fig.width=6}
 Heatmap(t(dfsub_16),
         name = "RNAseq", col=mako(50),
         top_annotation = ha,
