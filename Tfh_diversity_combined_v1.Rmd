@@ -998,13 +998,7 @@ top2 <- head(Tfh2genes, n=20)
 # Extract gene columns and merge
 merged_genes <- unique(c(topCM$gene, top1$gene, top2$gene))
 
-#dfsub_16<- Average.dfsub[, colnames(Average.dfsub) %in% merged_genes]
-# only 50 genes... 
-intersect(colnames(dfsub_16), merged_genes) #but it is subsetting right... 
-#intersect(colnames(dfsub_16), genes)
-
-
-
+dfsub_16<- Average.dfsub[, colnames(Average.dfsub) %in% merged_genes]
 dfsub_16 <- as.matrix(dfsub_16)
 dfsub_16 = scale(dfsub_16)
 
