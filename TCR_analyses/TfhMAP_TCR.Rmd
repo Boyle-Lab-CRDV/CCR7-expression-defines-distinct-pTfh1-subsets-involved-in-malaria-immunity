@@ -1,0 +1,439 @@
+---
+title: "TfhMAP_TCR"
+author: "Damian Oyong"
+date: "2023-11-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries
+
+```{r}
+library(Seurat)
+library(scRepertoire)
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(gtools)
+library(ggraph)
+library(purrr)
+library(tibble)
+library(circlize)
+library(viridis)
+library(ggalluvial)
+library(RColorBrewer)
+pacman::p_load(tidyr, dplyr, circlize)
+```
+
+## Import VDJ data and create scRepertoire df
+
+Rename barcode column to match Seurat object data
+
+```{r}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) # This only works if you are using RStudio
+
+file.names <- list.files(pattern = 'filtered_contig_annotations.csv', recursive = TRUE)
+names <- list.files(path='VDJ_Mode')
+
+file_seq <- 1:length(file.names)
+
+if(any(grepl("*.csv", file.names))==TRUE){
+  tfh_tcr <- file.names %>% 
+    lapply(., function(i){
+      fread(input = i)
+    }) %>%
+    setNames(names)
+}
+
+
+tfh_tcr <- combineTCR(tfh_tcr,
+                      samples = names,
+                      removeNA = TRUE,
+                      removeMulti = TRUE,
+                      filterMulti = TRUE)
+
+
+## Now we need to edit the barcode, delete everything before "v3_"
+
+tfh_tcr <- tfh_tcr %>% 
+  map(~.x %>% mutate(barcode = gsub(".*v3_","",barcode)))
+
+# tfh_tcr <- tfh_tcr[sort(names(tfh_tcr))]
+
+tfh_tcr <- tfh_tcr[c("Tfh1_vdjMode_BoyleLab_vdj_ref_v3","Tfh2_vdjMode_BoyleLab_vdj_ref_v3",
+                     "Tfh17_vdjMode_BoyleLab_vdj_ref_v3","PD1Neg_vdjMode_BoyleLab_vdj_ref_v3")]
+
+tfh_tcr <- tfh_tcr %>%
+  map2(., file_seq, ~mutate(.x, barcode = sub(1, .y, barcode)))
+
+```
+
+## Import Seurat
+
+```{r}
+
+## 
+tfh_map <- readRDS('MapTfh_TRremoved_integrated_reclustered_210823.rds')
+
+## Remove mito as per Megan's suggestion
+tfh_map <- subset(tfh_map, subset = integratedcluster %in% c("cluster2", "cluster3", "heatshock", "IFNI", "ribosomal", "Tfh1", "Tfh1_CM", "Tfh1.17", "Tfh17", "Tfh2", "Tfreg"))
+
+
+```
+
+## Combine VDJ and Seurat
+
+```{r}
+tfh_rep <- combineExpression(tfh_tcr, tfh_map,
+                             cloneCall="aa", 
+                             proportion = FALSE, 
+                             cloneSize=c(Single=1, Small=5, Medium=20, Large=100, Hyperexpanded=500))
+
+tfh_rep@meta.data$integratedcluster <-  factor(tfh_rep@meta.data$integratedcluster, 
+                                               levels = c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17", "Tfh1.17", "Tfreg", "IFNI", 
+                                                          "heatshock", "ribosomal", "cluster2", "cluster3"))
+
+```
+
+## This is the default cluster colors and orders
+
+```{r}
+
+cluster_col <- c("Tfh1" = "#9e0142", "Tfh1_CM" = "#f4a582", "Tfh2" = "#5e4fa2", 
+                 "Tfh17" = "#66c2a5", "Tfh1.17" = "#e6f598", "Tfreg" = "#74add1", 
+                 "IFNI" = "#8c510a", "heatshock" = "#bf812d", "ribosomal" = "#fee090", 
+                 "cluster2" = "#01665e", "cluster3" = "#b2abd2")
+
+cluster_orders <- c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17", "Tfh1.17", "Tfreg", "IFNI", "heatshock", "ribosomal", "cluster2", "cluster3")
+
+```
+
+```{r}
+
+# Label which cell contains either chain or both (Currently ignored)
+# tfh_rep@meta.data <- tfh_rep@meta.data %>%
+#   mutate(chain =
+#            case_when(grepl("TRA", tfh_rep@meta.data$CTgene) & grepl("_NA", tfh_rep@meta.data$CTaa) ~ "Alpha",
+#                      grepl("TRB", tfh_rep@meta.data$CTgene) & grepl("NA_", tfh_rep@meta.data$CTaa) ~ "Beta",
+#                      grepl("TRA|TRB", tfh_rep@meta.data$CTgene) ~ "Both")
+#   )
+
+```
+
+## How many cells:TCR
+```{r}
+cell.prop <- tfh_rep@meta.data %>% 
+  mutate(TCR = case_when(is.na(CTaa) == TRUE ~ "No",
+                         TRUE ~ "Yes"))
+
+cell.prop <- cell.prop %>% 
+  group_by(cloneSize) %>%
+  summarise(n = n())
+  # group_by(seurat_clusters) %>% 
+  # mutate(total = sum(n)) %>% 
+  # mutate(prop = n/total*100)
+
+```
+
+## Create a barplot of clonal frequency
+```{r}
+clone_order <- rev(mixedsort(unique(filter(tfh_rep@meta.data, !is.na(cloneType))$cloneType)))
+
+ggplot(filter(tfh_rep@meta.data, !is.na(cloneType)), aes(x = cloneType))+
+  geom_bar(fill="white", colour = "black")+
+  geom_text(stat='count', aes(label= ..count..), vjust=-1)+
+  scale_x_discrete(limits = clone_order)+
+  theme_classic()+
+  labs(y = "Count")+
+  theme(axis.title.x = element_blank())
+ggsave("Figures/Clonal_frequency.pdf")
+
+
+tfh_rep@meta.data <- tfh_rep@meta.data %>% 
+  mutate(cloneSize = case_when(clonalFrequency == 1 ~ "1",
+                               clonalFrequency == 2 ~ "2",
+                               clonalFrequency == 3 ~ "3",
+                               clonalFrequency == 4 ~ "4",
+                               clonalFrequency > 5 ~ ">5")) %>% 
+  mutate(cloneSize = factor(cloneSize, levels = c('1','2','3','4','>5')))
+
+ggplot(filter(tfh_rep@meta.data, !is.na(cloneSize)), 
+       aes(x = integratedcluster, fill = cloneSize))+
+  geom_bar(colour = "black", position = position_stack(reverse = TRUE))+
+  # geom_text(stat='count', aes(label= ..count..), vjust=-1)+
+  # scale_x_discrete(limits = clone_order)+
+  theme_classic()+
+  # scale_fill_brewer(palette = "GnBu", direction = -1)+
+  scale_fill_manual(values = c("grey","#ABDDA4", "#66C2A5", "#3288BD", "#5E4FA2"))+
+  labs(y = "Count")+
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(angle=90))
+ggsave("Figures/Clonal_Freq_byAnnot.pdf")
+
+```
+
+```{r}
+# This is if we want to get rid of singletons
+tfh_rep <- subset(tfh_rep, subset = clonalFrequency != 1)
+```
+
+## Create barplot of expanded clones, colored on subsets
+
+```{r}
+
+bar_clone <- tfh_rep@meta.data %>% 
+  filter(., !is.na(CTaa)) %>% 
+  group_by(CTaa, integratedcluster, donor_info) %>% 
+  summarise(count = n()) %>% 
+  ungroup() %>% 
+  group_by(CTaa) %>% 
+  mutate(total_n = sum(count)) %>% 
+  filter(., total_n > 1)
+
+cl_order <- bar_clone %>% 
+  ungroup() %>% 
+  group_by(CTaa) %>% 
+  summarise(total = sum(count)) %>% 
+  arrange(desc(total))
+
+ggplot(bar_clone, aes(x = CTaa, y = count))+
+  scale_x_discrete(limits = cl_order$CTaa)+
+  scale_y_continuous(breaks = seq(0,12, by = 2))+
+  geom_col(aes(fill = integratedcluster))+
+  scale_fill_manual(values = cluster_col)+
+  theme_classic()+
+  xlab("CTaa")+
+  theme(axis.text.x = element_blank())
+ggsave(filename = "Figures/ClonalCount_colored.pdf")
+
+# Count how many are non duplicated
+dups <- bar_clone %>%
+  filter(!duplicated(CTaa) & !duplicated(CTaa, fromLast = TRUE))
+
+```
+
+## Create barplot for shared clones
+
+```{r}
+tfh_share <- getCirclize(tfh_rep,
+                 group.by = "integratedcluster", proportion = T) %>% 
+  filter(., from != to) 
+  
+tfh_share <- rbind(tfh_share %>% rename(to = from, from = to),
+                  tfh_share) %>% 
+  mutate(value = round(value*100, 1))  
+
+tfh_share$from <- factor(tfh_share$from, levels = cluster_orders)
+
+ggplot(filter(tfh_share, from != to & value != 0), aes(x = from, y = value, fill = to))+
+  theme_classic()+
+  ylab("Proportion of Clones Sharing")+
+  labs(fill = "Cell Type")+
+  geom_col(colour = "black")+
+  scale_x_discrete(drop = T)+
+  geom_text(aes(label = value), size = 3, position = position_stack(vjust = 0.5))+
+  scale_fill_manual(values = cluster_col)+
+  theme(axis.title.x = element_blank())
+ggsave(filename = "Figures/SharedClones.pdf")
+```
+
+## Create Heatmap of Clonal Overlap between donors
+
+NOTE: These results are not bootstrapped. Ilka Wahl paper did bootsrapping 10,000. Need to find out more what's appropriate
+
+```{r}
+clonalOverlap(tfh_rep, cloneCall = "aa", 
+              method = "jaccard", group.by = "donor_id")+
+    theme(axis.title = element_blank(),
+        # axis.text = element_blank(),
+        axis.text.x = element_text(angle = 90),
+        axis.ticks = element_blank()
+        )
+
+# meta <- tfh_rep@meta.data %>% 
+#   distinct(donor_id) %>% 
+#   remove_rownames()
+# # meta$day = factor(meta$day, levels = c('day0','day8','day16','day36'))
+# 
+# donor_labs <- ggplot(meta, aes(donor_day, y=1, fill=donor_id)) + geom_tile() +
+#   scale_fill_brewer(palette = 'Set1',name="Donor ID") + 
+#   theme_void() 
+# 
+# day_labs <- ggplot(meta, aes(donor_day, y=1, fill=day)) + geom_tile() +
+#   scale_fill_brewer(palette = 'Set3',name="Day") + 
+#   theme_void() 
+# 
+# ibsm_overlap %>% insert_top(., donor_labs, height = .05) %>% 
+#   insert_top(., day_labs, height = .05)
+
+ggsave(filename = "Figures/ClonalOverlap.pdf")
+
+```
+
+
+
+## Create circos plot
+
+Circos plot on TCR clones shared between cell types and day. Here, we want to ask what are the celltype identities clonal pairs and how they are related over time.
+
+```{r}
+# Create  a new column donor_clust for ChordDiagram "sector"
+tfh_rep@meta.data$donor_clust <- paste(tfh_rep@meta.data$donor_info, tfh_rep@meta.data$integratedcluster, sep="_")
+
+# Create circos df using getCirclize function
+tfh_circos <- getCirclize(tfh_rep, group.by = "donor_clust") %>% 
+  filter(., value!=0)
+
+# Metadata on naming the group
+df_names <- tfh_rep@meta.data %>% 
+  select(integratedcluster, donor_info, donor_clust) %>% 
+  distinct(donor_clust, .keep_all = TRUE) %>% 
+  remove_rownames() %>% 
+  arrange(., factor(integratedcluster))
+
+# We need to match color donor_clust variables based on cell type
+# Currently done manually, need to find easier way
+names <- unique(c(tfh_circos$from, tfh_circos$to))
+
+grid.col <- case_when(grepl("_Tfh1$", names) ~ "#9e0142",
+                      grepl("_Tfh1_CM$", names) ~ "#f4a582",
+                      grepl("Tfh2", names) ~ "#5e4fa2",
+                      grepl("Tfh17", names) ~ "#66c2a5",
+                      grepl("Tfh1.17", names) ~ "#e6f598",
+                      grepl("Tfreg", names) ~ "#74add1",
+                      grepl("IFNI", names) ~ "#8c510a",
+                      grepl("heatshock", names) ~ "#bf812d",
+                      grepl("ribosomal", names) ~ "#fee090",
+                      grepl("_cluster2$", names) ~ "#01665e",
+                      grepl("_cluster3$", names) ~ "#b2abd2",
+                      TRUE ~ NA)
+
+names(grid.col) <- names
+
+# We want to split the circos based on donor grouping
+group = structure(df_names$donor_info, names = df_names$donor_clust)
+group = factor(group, levels = c("donor0", "donor1", "donor2","donor3"))
+
+# Now plot backbone of circos
+
+pdf("Figures/ChordDiagram.pdf")
+
+chordDiagram(tfh_circos, 
+             grid.col = grid.col,
+             annotationTrack = "grid",
+             preAllocateTracks = list(list(track.height = 0.075),
+             #                          # list(track.height = 0.075),
+                                      list(track.height = 0.001)),
+             annotationTrackHeight = mm_h(5),
+             group = group,
+             big.gap = 20, small.gap = 1,
+             direction.type = c("diffHeight", "arrows"))
+
+# Now manually name the inner sector based on cell type
+names <- data.frame(donor_clust = get.all.sector.index()) %>% 
+  left_join(., df_names, by = "donor_clust")
+names <- names$integratedcluster
+
+for(i in seq_along(names)){
+  si <- get.all.sector.index()[i]
+  nm <- names[i]
+  
+    xlim = get.cell.meta.data("xlim", sector.index = si, track.index = 2)
+    ylim = get.cell.meta.data("ylim", sector.index = si, track.index = 2)
+    circos.text(mean(xlim), mean(ylim), nm, sector.index = si, track.index = 2, 
+        facing = "outside", niceFacing = TRUE, col = "black", cex = 0.5)
+}
+
+# Now plot outer ribbon on days
+# highlight.sector(filter(df_names, day == 'day0')$donor_clust, track.index = 1, col = viridis(n=4)[1], text = "Day 0", cex = 0.75, text.col = "white", niceFacing = TRUE)
+# highlight.sector(filter(df_names, day == 'day8')$donor_clust, track.index = 1, col = viridis(n=4)[2], text = "Day 8", cex = 0.75, text.col = "white", niceFacing = TRUE)
+# highlight.sector(filter(df_names, day == 'day16')$donor_clust, track.index = 1, col = viridis(n=4)[3], text = "Day 16", cex = 0.75, text.col = "white", niceFacing = TRUE)
+# highlight.sector(filter(df_names, day == 'day36')$donor_clust, track.index = 1, col = viridis(n=4)[4], text = "Day 36", cex = 0.75, text.col = "white", niceFacing = TRUE)
+
+highlight.sector(filter(df_names, donor_info == 'donor0')$donor_clust, track.index = 1, border = "black", col = "white", text = "Donor 0", cex = 0.75, text.col = "black", niceFacing = TRUE)
+highlight.sector(filter(df_names, donor_info == 'donor1')$donor_clust, track.index = 1, border = "black", col = "white", text = "Donor 1", cex = 0.75, text.col = "black", niceFacing = TRUE)
+highlight.sector(filter(df_names, donor_info == 'donor2')$donor_clust, track.index = 1, border = "black", col = "white", text = "Donor 2", cex = 0.75, text.col = "black", niceFacing = TRUE)
+highlight.sector(filter(df_names, donor_info == 'donor3')$donor_clust, track.index = 1, border = "black", col = "white", text = "Donor 3", cex = 0.75, text.col = "black", niceFacing = TRUE)
+
+circos.clear()
+
+dev.off()
+
+dev.set()
+```
+
+
+
+## Generate GLIPH check if they are CMV
+
+
+## Clonal Heatmap Fidelity
+
+```{r}
+fidel <- tfh_rep@meta.data %>% 
+  select(CTaa, integratedcluster) %>% 
+  tibble::remove_rownames() %>% 
+  group_by(CTaa, integratedcluster) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  group_by(CTaa) %>% 
+  mutate(total = sum(n)) %>% 
+  ungroup() %>% 
+  mutate(prop = n/total) %>% 
+  select(-c(n, total)) %>% 
+  pivot_wider(names_from = CTaa, values_from = prop) %>% 
+  arrange(., integratedcluster) %>% 
+  column_to_rownames(., var = "integratedcluster") %>% 
+  mutate_all(~replace(., is.na(.), 0)) %>%
+  arrange()
+
+count_per_clone <- tfh_rep@meta.data %>% 
+  select(CTaa) %>% 
+  tibble::remove_rownames() %>% 
+  group_by(CTaa) %>% 
+  summarise(n = n()) 
+
+cluster_count <- tfh_rep@meta.data %>% 
+  select(CTaa, integratedcluster) %>% 
+  remove_rownames() %>% 
+  group_by(integratedcluster) %>% 
+  summarise(n = n()) %>% 
+  mutate(prop = n/sum(n)*100) %>% 
+  column_to_rownames(., var = "integratedcluster")
+
+# column_sums <- t %>%
+#   mutate_all(~replace(., is.na(.), 0)) %>%
+#   summarise(across(everything(), sum)) %>%
+#   pivot_longer(., everything(), values_to = "Sum") %>%
+#   arrange(desc(Sum))
+# 
+# t <- t[column_sums$name]
+fidel <- as.matrix(fidel)
+
+library(ComplexHeatmap)
+
+pdf("Figures/Heatmap_fidelity.pdf", width = 20)
+Heatmap((fidel),
+        name = "Clonal Proportion",
+        cluster_columns = T, column_dend_side = "bottom", clustering_method_columns = "ward.D2",
+        cluster_rows = F,
+        show_column_names = F,
+        # left_annotation = rowAnnotation(Prop = anno_barplot(
+        #   cluster_count$prop, axis_param = list(direction = "reverse")),
+        #                                                   annotation_name_rot = 90),
+        top_annotation = HeatmapAnnotation(Count = anno_barplot(
+          count_per_clone$n, axis_param = list(at = c(2, 5, 12))), 
+          annotation_name_rot = 90),
+        # rect_gp = gpar(col = "white", lwd = 0.5),
+        width = ncol(fidel)*unit(0.05, "in"),
+        height = nrow(fidel)*unit(0.6, "in"),
+        col = colorRampPalette(RColorBrewer::brewer.pal(9, "Greens"))(100))  
+        # Use continuous scale with 100 shades
+dev.off()
+dev.set()
+
+```
+
