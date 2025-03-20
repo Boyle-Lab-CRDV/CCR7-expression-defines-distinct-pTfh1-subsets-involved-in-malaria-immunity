@@ -3,6 +3,7 @@ title: "CCR7 expression defines distinct pTfh1 subsets involved in malaria immun
 author: "Megan Soon and Damian Oyong"
 date: "2025-03-03"
 output: html_document
+        toc: TRUE
 ---
 
 ```{r setup0, include=TRUE}
