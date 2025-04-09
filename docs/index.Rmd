@@ -3,7 +3,6 @@ title: "CCR7 expression defines distinct pTfh1 subsets involved in malaria immun
 author: "Megan Soon and Damian Oyong"
 date: "2025-03-03"
 output: html_document
-        toc: TRUE
 ---
 
 ```{r setup0, include=TRUE}
@@ -200,7 +199,7 @@ Input data, can be downloaded from the NCBI data base under accession number GSE
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) # This only works if you are using RStudio
 
 file.names <- list.files(pattern = 'filtered_contig_annotations.csv', recursive = TRUE)
-names <- list.files(path='VDJ_Mode')
+names <- list.files(path="VDJ_Mode")
 
 file_seq <- 1:length(file.names)
 
@@ -232,15 +231,41 @@ tfh_tcr <- tfh_tcr[c("Tfh1_vdjMode_BoyleLab_vdj_ref_v3","Tfh2_vdjMode_BoyleLab_v
 tfh_tcr <- tfh_tcr %>%
   purrr::map2(., file_seq, ~mutate(.x, barcode = sub(1, .y, barcode)))
 
-#write.csv(tfh_tcr, "tfh_tcr_db_30325.csv")
+
+tfh_tcr_db0 <- lapply(names(tfh_tcr), function(name) {
+                df <- tfh_tcr[[name]]
+                df$day <- name
+                colnames(df)[1] <- "barcode"
+                colnames(df)[2] <- "sample"
+                colnames(df)[3] <- "TCR1"
+                colnames(df)[4] <- "cdr3_aa1"
+                colnames(df)[5] <- "cdr3_nt1"
+                colnames(df)[6] <- "TCR2"
+                colnames(df)[7] <- "cdr3_aa2"
+                colnames(df)[8] <- "cdr3_nt2"
+                colnames(df)[9] <- "CTgene"
+                colnames(df)[10] <- "CTnt"
+                colnames(df)[11] <- "CTaa"
+                colnames(df)[12] <- "CTstrict"
+                return(df)
+})        
+tfh_tcr_db = as.data.frame(do.call(rbind, tfh_tcr_db0))
+
+#write.csv(tfh_tcr_db, "/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/tfh_tcr_db_30325.csv")
 ```
 
 ```{r reading saved tfh csv, include= FALSE, echo=TRUE, warning=FALSE}
 tfh_tcr.db <- read.csv("/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/tfh_tcr_db_30325.csv")
 tfh_tcr.db <- tfh_tcr.db[,-1]
-tfh_tcr <- split(tfh_tcr.db, f= "day")
+tfh_tcr <- split(tfh_tcr.db, f= tfh_tcr.db$day)
 ```
+```{r reading expression data, include= FALSE, echo=TRUE, warning=FALSE}
+## 
+Tfh.Map <- readRDS("/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_TCR_4.4/MapTfh_TRremoved_integrated_reclustered_210823.rds")
 
+## Remove mito as per Megan's suggestion
+Tfh.Map <- subset(Tfh.Map, subset = integratedcluster %in% c("cluster2", "cluster3", "heatshock", "IFNI", "ribosomal", "Tfh1", "Tfh1_CM", "Tfh1.17", "Tfh17", "Tfh2", "Tfreg"))
+```
 ```{r Combine Tfh VDJ and Seurat, include=TRUE, echo=TRUE}
 #Combining expression and VDJ output
 tfh_rep <- combineExpression(tfh_tcr, Tfh.Map,
@@ -269,13 +294,25 @@ cell.prop <- tfh_rep@meta.data %>%
 cell.prop <- cell.prop %>% 
   group_by(cloneSize) %>%
   summarise(n = n())
+
+tfh_rep@meta.data <- tfh_rep@meta.data %>% 
+  mutate(cloneSize = case_when(clonalFrequency == 1 ~ "1",
+                               clonalFrequency == 2 ~ "2",
+                               clonalFrequency == 3 ~ "3",
+                               clonalFrequency == 4 ~ "4",
+                               clonalFrequency > 5 ~ ">5")) %>% 
+  mutate(cloneSize = factor(cloneSize, levels = c('1','2','3','4','>5')))
+
+
 ```
 
 #### Figure 1 G \| Fate sharing at the individual clonotype level across transcriptional subsets.
 
 ```{r, Figure1G_Fate sharing at the individual clonotype level across transcriptional subsets, echo=TRUE,warning=FALSE, fig.width=6, fig.height=12, out.width="50%", fig.align='center'}
+# This is if we want to get rid of singletons
+tfh_repM <- subset(tfh_rep, subset = clonalFrequency != 1)
 
-fidel <- tfh_rep@meta.data %>% 
+fidel <- tfh_repM@meta.data %>% 
   select(CTaa, integratedcluster) %>% 
   tibble::remove_rownames() %>% 
   group_by(CTaa, integratedcluster) %>% 
@@ -292,13 +329,13 @@ fidel <- tfh_rep@meta.data %>%
   mutate_all(~replace(., is.na(.), 0)) %>%
   arrange()
 
-count_per_clone <- tfh_rep@meta.data %>% 
+count_per_clone <- tfh_repM@meta.data %>% 
   select(CTaa) %>% 
   tibble::remove_rownames() %>% 
   group_by(CTaa) %>% 
   summarise(n = n()) 
 
-cluster_count <- tfh_rep@meta.data %>% 
+cluster_count <- tfh_repM@meta.data %>% 
   select(CTaa, integratedcluster) %>% 
   remove_rownames() %>% 
   group_by(integratedcluster) %>% 
@@ -403,7 +440,7 @@ Tfh.IBSM.2@meta.data <- metadata
 #saveRDS(Tfh.IBSM.2, "Tfh.IBSM.2_REANNOTATION_POSTNORM_V2_200724.rds")
 ```
 
-```{r Getting data for Figure4A_Relative expression of marker genes used to annotate reference data set in each subset in CHMI data set, echo=TRUE,warning=FALSE}
+```{r Getting data for Figure4A_Relative expression of marker genes used to annotate reference data set in each subset in CHMI data set, include = TRUE, echo=TRUE, warning=FALSE}
 TfhIBSM <- readRDS("/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/Tfh.IBSM.2_REANNOTATION_POSTNORM_V2_200724.rds")
 
 DefaultAssay(TfhIBSM)
@@ -506,29 +543,32 @@ metadata <- as.data.frame(TfhIBSM@meta.data)
 
 try <- metadata[, c("seurat_clusters", "day", "donor_id", "alternative_clusters")]
 
-try.4 <- try %>%
-  group_by(alternative_clusters, donor_id, day) %>%   # grouping
-  summarise(n = n()) %>%
+try.5 <- try %>%
+  group_by(alternative_clusters, donor_id, day) %>%  
+  summarise(n = n(), .groups = "drop") %>%  
+  group_by(donor_id, day) %>%
   mutate(freq = n / sum(n))
 
-try.4$donor_id <- factor(try.4$donor_id, levels = c("donor0", "donor1", "donor2", "donor3"))
+## Add order before plotting
+try.5$donor_id <- factor(try.5$donor_id, levels = c("donor0", "donor1", "donor2", "donor3"))
 
-try.4$day <- factor(try.4$day, levels = c("day0", "day8", "day16", "day36"))
+try.5$day <- factor(try.5$day, levels = c("day0", "day8", "day16", "day36"))
 
-try.4$alternative_clusters <- factor(try.4$alternative_clusters, 
-                                levels = c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17","Tfh1.17",
-                                           "Tfreg", "IFNI", "heatshock", "ribo",
-                                           "cluster2", "cluster3"))
+try.5$alternative_clusters <- factor(try.5$alternative_clusters, 
+                                     levels = c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17","Tfh1.17",
+                                                "Tfreg", "IFNI", "heatshock", "ribo",
+                                                "cluster2", "cluster3"))
 ##Only clusters showing 
-clusts = c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17")
+try.5_subset <- try.5 %>%
+  filter(alternative_clusters %in% c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17"))
 ```
 
 ```{r Figure 4C_Relative proportion of each pTfh transcriptional cluster during CHMI, echo=TRUE,warning=FALSE, fig.height=6, fig.width=10, out.width="70%", fig.align='center'}
-ggplot(data = try.4, aes(x=day, y=freq)) +
+ggplot(data = try.5_subset, aes(x=day, y=freq)) +
   geom_line(aes(group = donor_id, colour = donor_id)) +
   geom_point(aes(group = donor_id, colour = donor_id)) + 
-  geom_boxplot(data = try.4, fill = "grey", width = 0.5, outlier.shape = NA) +
-  facet_wrap(~alternative_clusters, ncol = 5) + 
+  geom_boxplot(data = try.5_subset, aes(x = day, y = freq), fill = "grey", width = 0.5, outlier.shape = NA) + 
+  facet_wrap(~alternative_clusters, ncol = 4) + 
   theme_classic() + 
   scale_colour_manual(values = c("#d53e4f", "#3288bd", "#1a9850", "#c2a5cf"))
 ```
@@ -538,8 +578,8 @@ ggplot(data = try.4, aes(x=day, y=freq)) +
 ```{r reading VDJ data for CHMI cohort, eval=FALSE, warning=FALSE}
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) # This only works if you are using RStudio
 
-file.names <- list.files(pattern = 'filtered_contig_annotations.csv', recursive = TRUE)
-names <- list.files(path='VDJ')
+file.names <- list.files(path="/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_TCR_4.4/IBSM40", pattern = 'filtered_contig_annotations.csv', recursive = TRUE)
+names <- list.files(path='/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_TCR_4.4/IBSM40/VDJ')
 
 file_seq <- 1:length(file.names)
 
@@ -569,20 +609,40 @@ ibsm_tcr <- combineTCR(ibsm_tcr,
 ibsm_tcr <- ibsm_tcr %>% 
   map(~.x %>% mutate(barcode = gsub(".*VDJ_","",barcode)))
 
-#write.csv(ibsm_tcr, "ibsm40_tcr_db_30325.csv")
+ibsm_tcr_db0 <- lapply(names(ibsm_tcr), function(name) {
+                df <- ibsm_tcr[[name]]
+                df$day <- name
+                colnames(df)[1] <- "barcode"
+                colnames(df)[2] <- "sample"
+                colnames(df)[3] <- "TCR1"
+                colnames(df)[4] <- "cdr3_aa1"
+                colnames(df)[5] <- "cdr3_nt1"
+                colnames(df)[6] <- "TCR2"
+                colnames(df)[7] <- "cdr3_aa2"
+                colnames(df)[8] <- "cdr3_nt2"
+                colnames(df)[9] <- "CTgene"
+                colnames(df)[10] <- "CTnt"
+                colnames(df)[11] <- "CTaa"
+                colnames(df)[12] <- "CTstrict"
+                return(df)
+})        
+ibsm_tcr_db = as.data.frame(do.call(rbind, ibsm_tcr_db0))
+
+write.csv(ibsm_tcr.db, "/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/ibsm40_tcr_db_30325.csv")
 ```
 
 ```{r reading saved chmi csv, include= FALSE, echo=TRUE, warning=FALSE}
 ibsm_tcr.db <- read.csv("/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/ibsm40_tcr_db_30325.csv")
 ibsm_tcr.db <- ibsm_tcr.db[,-1]
-ibsm_tcr <- split(ibsm_tcr.db, f= "day")
+ibsm_tcr <- split(ibsm_tcr.db, f= ibsm_tcr.db$sample)
+
 ```
 
 ##### Import Seurat
 
 ```{r Reading CHMI Seurat object, include= TRUE, echo=TRUE, warning=FALSE}
 ##reading seurat object 
-ibsm <- readRDS("/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/input/Tfh.IBSM.2_REANNOTATION_POSTNORM_V2_200724.rds")
+ibsm <- readRDS("/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_TCR_4.4/IBSM40/Tfh.IBSM.2_REANNOTATION_POSTNORM_V2_200724.rds")
 ```
 
 ##### Combine VDJ and Seurat
@@ -606,6 +666,7 @@ ibsm_rep@meta.data$alternative_clusters <-  factor(ibsm_rep@meta.data$alternativ
 ##### How many cells:TCR
 
 ```{r Calculating CHMI cell proportion and frequency, include= TRUE, echo=TRUE, warning=FALSE }
+#How many cells
 cell.prop <- ibsm_rep@meta.data %>% 
   mutate(TCR = case_when(is.na(CTaa) == TRUE ~ "No",
                          TRUE ~ "Yes"))
@@ -627,14 +688,13 @@ cluster_col <- c("Tfh1" = "#9e0142", "Tfh1_CM" = "#f4a582", "Tfh2" = "#5e4fa2",
                  "IFNI" = "#8c510a", "heatshock" = "#bf812d", "ribosomal" = "#fee090", 
                  "cluster2" = "#01665e", "cluster3" = "#b2abd2")
 
-cluster_orders <- c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17", "Tfh1.17", "Tfreg", "IFNI", "heatshock", "ribo", "cluster2", "cluster3")
-
+# cluster_orders <- c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17", "Tfh1.17", "Tfreg", "IFNI", "heatshock", "ribo", "cluster2", "cluster3")
+cluster_orders <- c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17")
 donor_col <- c("donor0"="#d53e4f", "donor1"="#3288bd", "donor2"="#1a9850", "donor3" = "#c2a5cf")
 
-##Determine clone order
 clone_order <- rev(mixedsort(unique(filter(ibsm_rep@meta.data, !is.na(cloneSize))$cloneSize)))
 
-
+##Determine clone order
 ibsm_rep@meta.data <- ibsm_rep@meta.data %>% 
   mutate(cloneN = case_when(clonalFrequency == 1 ~ "1",
                                clonalFrequency == 2 ~ "2",
@@ -657,7 +717,7 @@ count_data <- ibsm_rep@meta.data %>%
   group_by(day, donor_day, donor_id) %>% 
   count(cloneN2) %>% 
   mutate(day = factor(day, levels = c("day0","day8","day16","day36")))
-
+set.seed(123)
 p <- count_data %>% 
   group_by(cloneN2) %>% 
   wilcox_test(n ~ day, paired = F) %>% 
@@ -674,13 +734,15 @@ ggplot(count_data, aes(x = day, y = n)) +
   labs(y = "Count") +
   theme(axis.title.x = element_blank(), axis.text.x = element_text(angle = 90)) +
   facet_wrap(~cloneN2) +
-  stat_pvalue_manual(p, label = "p", hide.ns = "p")
+  stat_pvalue_manual(p, label = "p", hide.ns = 'p')
 ```
 
 #### Figure 4 E \| Clone family size count over time in each subset - Clonal expansion was detected in Tfh1_cyto, Tfh1_CCR7 and Tfh2 clusters at day 16
 
 ```{r, Figure4E_Clone family size count over time in each subset, warning=FALSE, fig.width=10, fig.height=6, out.width="70%", fig.align='center'}
-ggplot(filter(ibsm_rep@meta.data, !is.na(cloneN)), 
+ibsm_rep_subC <-  subset(ibsm_rep, subset = alternative_clusters %in% c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17"))
+
+ggplot(filter(ibsm_rep_subC@meta.data, !is.na(cloneN)), 
        aes(x = alternative_clusters, fill = cloneN))+
   geom_bar(colour = "black", position = position_stack(reverse = TRUE), linewidth = 0.3)+
   # geom_text(stat='count', aes(label= ..count..), vjust=-1)+
@@ -742,12 +804,13 @@ ggplot(ibsm_div_day, aes(x = day, y = diversity, color = donor_id))+
 
 ```{r Getting data for Figure4G, include=TRUE, echo=TRUE, warning=FALSE}
 ##subset to clonal frequency higher than 1
-ibsm_rep <- subset(ibsm_rep, subset = clonalFrequency != 1)
+ibsm_rep_sClon <- subset(ibsm_rep, subset = clonalFrequency != 1)
+ibsm_rep_sClon <- subset(ibsm_rep_sClon, subset = day == "day16")
 ```
 
 ```{r Figure 4G_Clonal overlap at day 16 across clusters. Clonal size is indicated in count in top bar, each clonal proportion across subsets is indicated, include=TRUE, warning=FALSE, fig.width=20, fig.height=10, out.width="70%", fig.align='center'}
-for (i in unique(ibsm_rep@meta.data$day)){
-  fidel <- ibsm_rep@meta.data %>% 
+for (i in unique(ibsm_rep_sClon@meta.data$day)){
+  fidel <- ibsm_rep_sClon@meta.data %>% 
     filter(., day == i) %>% 
     select(CTaa, alternative_clusters) %>% 
     tibble::remove_rownames() %>% 
@@ -765,7 +828,7 @@ for (i in unique(ibsm_rep@meta.data$day)){
     mutate_all(~replace(., is.na(.), 0)) %>%
     arrange()
 
-  count_per_clone <- ibsm_rep@meta.data %>% 
+  count_per_clone <- ibsm_rep_sClon@meta.data %>% 
     filter(., day == i) %>% 
     select(CTaa) %>% 
     tibble::remove_rownames() %>% 
@@ -773,7 +836,7 @@ for (i in unique(ibsm_rep@meta.data$day)){
     summarise(n = n()) 
   max_count <- max(count_per_clone$n)
 
-  cluster_count <- ibsm_rep@meta.data %>% 
+  cluster_count <- ibsm_rep_sClon@meta.data %>% 
     filter(., day == i) %>% 
     select(CTaa, alternative_clusters) %>% 
     remove_rownames() %>% 
@@ -924,8 +987,6 @@ Tfh.8@meta.data$day_donor <- factor(Tfh.8@meta.data$day_donor,
 
 
 Idents(Tfh.8) <- "alternative_clusters"
-DimPlot(Tfh.8, group.by = "ident", cols = Tfh_colors_list, pt.size = 2, label = T)
-table(Tfh.8@meta.data$alternative_clusters)
 
 #Extract Counts and Metadata
 # Extract raw counts and metadata to create SingleCellExperiment object
@@ -966,7 +1027,6 @@ sce <- sce[rowSums(counts(sce) > 1) >= 10, ]
 
 # (genes) x (cells)
 dim(sce)
-# 9252 genes... 
 
 #Preparing data for count aggregation
 # Named vector of cluster names =
@@ -1192,12 +1252,12 @@ for(cluster in 1:length(keepClusters)){
   
 }
 
-#### Day 0 vs Day 16 ####
+####### Day 0 vs Day 16
 
-#SUBSET FOR DAY COMPARISONS YOU WANT
+############### SUBSET FOR DAY COMPARISONS YOU WANT #####################
 Tfh.16 <- subset(TfhIBSM, subset = day %in% c("day0", "day16"))
 table(Tfh.16@meta.data$day)
-#Redefining orders for days and donor_days
+#### Redefining orders for days and donor_days
 
 Tfh.16@meta.data$day <- factor(Tfh.16@meta.data$day, levels = c("day0", "day16"))
 
@@ -1208,11 +1268,12 @@ table(Tfh.16@meta.data$day_donor)
 Tfh.16@meta.data$day_donor <- factor(Tfh.16@meta.data$day_donor, 
                                      levels = c("day0_donor0", "day0_donor1", "day0_donor2", "day0_donor3",
                                                 "day16_donor0", "day16_donor1", "day16_donor2", "day16_donor3"))
+
+
 Idents(Tfh.16) <- "alternative_clusters"
-DimPlot(Tfh.16, group.by = "ident", cols = Tfh_colors_list, pt.size = 2, label = T)
 table(Tfh.16@meta.data$alternative_clusters)
 
-# Extract Counts and Metadata
+########Extract Counts and Metadata###############
 # Extract raw counts and metadata to create SingleCellExperiment object
 counts <- GetAssayData(object = Tfh.16, layer = "counts", assay="RNA")
 metadata <- Tfh.16@meta.data
@@ -1224,16 +1285,130 @@ table(metadata$cluster_id)
 # Create single cell experiment object
 sce <- SingleCellExperiment(assays = list(counts = counts),
                             colData = metadata)
+
+
 ## Explore the cellular metadata for the dataset
 ### (number of cells) * (number of meta columns)
 dim(colData(sce)) 
 
-#Explore the counts data
-#Starting EdgeR Analysis
 
-# Subset Clusters 
+#####Explore the counts data##########
 
-# construct SCE of pseudo-bulk counts for only select clusters
+#Explore the raw counts for the dataset
+## Check the assays present (only counts)
+assays(sce)
+
+
+#Explore the raw counts for the dataset
+### (genes) * (cells)
+dim(counts(sce))  
+
+counts(sce)[1:6, 1:6]
+
+
+
+#####Additional QC filtering##########
+## Remove lowly expressed genes which have less than 10 cells with any counts
+sce <- sce[rowSums(counts(sce) > 1) >= 10, ]
+
+# (genes) x (cells)
+dim(sce)
+# 9423 genes... 
+
+
+####Preparing data for count aggregation##########
+# Named vector of cluster names =
+## 10
+kids <- purrr::set_names(levels(sce$cluster_id))
+
+# Total number of clusters
+## 10
+nk <- length(kids)
+
+# Named vector of sample names
+sids <- purrr::set_names(levels(as.factor(sce$day_donor)))
+
+
+# Total number of samples = donor_id 
+## 16
+ns <- length(sids)
+
+# Generate sample level metadata
+
+## Determine the number of cells per sample
+#table(sce$day_donor)
+
+## Turn class "table" into a named vector of cells per sample
+n_cells <- table(sce$day_donor) %>%  as.vector()
+names(n_cells) <- names(table(sce$day_donor))
+
+
+## Match the named vector with metadata to combine it
+m <- match(names(n_cells), sce$day_donor)
+
+## Create the sample level metadata by selecting specific columns
+ei <- data.frame(colData(sce)[m, ], 
+                 n_cells, row.names = NULL) %>% 
+  dplyr::select("day_donor", "day", "n_cells")
+kable(ei)
+
+
+
+
+#######Count aggregation ##########
+
+# Aggregate the counts per sample_id and cluster_id
+
+# Subset metadata to only include the cluster and sample IDs to aggregate across
+groups <- colData(sce)[, c("cluster_id", "day_donor")]
+groups$day_donor <- factor(groups$day_donor)
+
+# Aggregate across cluster-sample groups
+# Each row corresponds to aggregate counts for a cluster-sample combo
+pb <- aggregate.Matrix(t(counts(sce)), 
+                       groupings = groups, fun = "sum") 
+
+# class(pb)
+# dim(pb)
+pb[1:8, 1:8]
+
+
+
+
+####Split/subsetting###########
+##Here, we split the aggregated matrix into a matrix for each cluster. 
+##In the table below, we report the total number of cells in each sample correposnding to each cluster
+
+# create a vector that represents how to split samples
+splitf <- sapply(stringr::str_split(rownames(pb), 
+                                    pattern = "_day",n = 2), `[`, 1)
+
+
+# Split data and turn into a list
+# Each component corresponds to a cluster; storing associated expression matrix (counts)
+# Transform data i.e, so rows are genes and columns are samples 
+pb <- split.data.frame(pb,factor(splitf)) %>%
+  lapply(function(u) 
+    set_colnames(t(u), gsub(".*_da", "", rownames(u))))
+
+
+
+# Explore the different components of list
+class(pb)
+str(pb)
+
+###Print cluster-sample table
+
+options(width = 100)
+kable(table(sce$cluster_id, sce$day_donor))
+
+
+
+######Starting EdgeR Analysis##########
+
+######Subset Clusters ###############
+
+### construct SCE of pseudo-bulk counts for only select clusters
 # If you are interested in all clusters AND you have the same samples represented in each cluster you can just use pb
 
 #Note: We want all clusters and already remove cluster 8 at the beginning.
@@ -1255,7 +1430,7 @@ keepClusters <- as.character(c("Tfh1", "Tfh1_CM", "Tfh2", "Tfh17", "Tfreg", "IFN
 # Subset the sce object - I use all.
 pbc <- SingleCellExperiment(assays = pb)
 
-#MDS plots
+######## MDS plots #######
 # Similar to a PCA plot, the MDS allows us to visulize the distances between samples 
 # for each cluster. Ideally we'd like "het" samples to segregate together and "ko" together.
 
@@ -1281,6 +1456,10 @@ plots <- lapply(mds, function(m){
                        group_id = ei$day_donor,
                        cluster_id = rep(m$cluster, length(m$x)))})
 
+
+
+
+
 # Create a plotting function
 plotFunc <- function(x) {
   ggplot(x, aes(x, y, col = group_id)) + 
@@ -1292,6 +1471,7 @@ plotFunc <- function(x) {
           plot.title = element_text(hjust = 0.5)) +
     coord_fixed() 
 }
+
 
 plotFunc2 <- function(x) {
   ggplot(x, aes(x, y, col = group_id)) + 
@@ -1306,14 +1486,20 @@ plotFunc2 <- function(x) {
     coord_fixed() 
 }
 
+
 # Plot all MDS plots
 do.call(grid.arrange,c(lapply(plots, plotFunc)))
 # plotting again but colouring by days (day 0 - purple, day 16 - orange)
 do.call(grid.arrange,c(lapply(plots, plotFunc2)))
 
+
+
 mds_d16<- do.call(grid.arrange,c(lapply(plots, plotFunc2)))
 
-# Run differential expression analysis
+ggsave(plot = mds_d16, filename = "/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/output/MDSplots_d16_TfhIBSM_ALTERNATIVE_240724.pdf",
+       width = 420, height= 297, units = "mm", device = "pdf" )
+
+##### Run differential expression analysis ########
 #First set up the experiment design and a contrast matrix.
 
 # construct design & contrast matrix
@@ -1347,7 +1533,8 @@ res_fil <- lapply(res,
                     dplyr::filter(p_adj < 0.05, abs(logFC) > 1) %>% 
                     dplyr::arrange(p_adj))
 
-#Significant genes 
+
+#######Significant genes ###########
 # We filter the results with the criteria FDR < 0.05, and |logFC| > 1. 
 # For each cluster we report the number of differentially expressed genes and what percentage that represents (of total genes).
 
@@ -1391,7 +1578,6 @@ Tfh.36@meta.data$day_donor <- factor(Tfh.36@meta.data$day_donor,
 
 
 Idents(Tfh.36) <- "alternative_clusters"
-DimPlot(Tfh.36, group.by = "ident", cols = Tfh_colors_list, pt.size = 2, label = T)
 table(Tfh.36@meta.data$alternative_clusters)
 
 #Extract Counts and Metadata
@@ -1600,7 +1786,7 @@ do.call(grid.arrange,c(lapply(plots, plotFunc2)))
 
 mds_d36<- do.call(grid.arrange,c(lapply(plots, plotFunc2)))
 
-ggsave(plot = mds_d36, filename = "MDSplots_d36_ALTERNATIVE_240724.pdf",
+ggsave(plot = mds_d36, filename = "/working_groups/boylelab/shared/ZulyPava/Tfh_diversity_finalcode/MDSplots_d36_ALTERNATIVE_240724.pdf",
        width = 420, height= 297, units = "mm", device = "pdf" )
 
 # Run differential expression analysis
@@ -1719,6 +1905,7 @@ Tfh_colors_list <- c("#9e0142", "#f4a582", "#5e4fa2", "#66c2a5", "#74add1",
 
 
 # Create the bar plot with custom colors
+
 ggplot(upset1, aes(x = celltype, fill = celltype)) +
   geom_bar() +  # Counts occurrences of each celltype
   facet_wrap(~ day) +  # Facet by day
@@ -1732,46 +1919,51 @@ ggplot(upset1, aes(x = celltype, fill = celltype)) +
 #### Figure 5 B \| Venn diagram indicating the shared and unique DEGS at day 16 for Tfh1_cytotoxic, Tfh1_CCR7 and Tfh2 subsets.
 
 ```{r Figure5B_Venn diagram indicating the shared and unique DEGS at day 16 for Tfh1_cytotoxic, Tfh1_CCR7 and Tfh2 subsets, include=TRUE, warning=FALSE,fig.height= 4, fig.width=4, out.width="50%", fig.align='center'}
-Tfh1_genecounts = sum(upset1$celltype=="Tfh1")
-Tfh1CM_genecounts = sum(upset1$celltype=="Tfh1CM")
-Tfh2_genecounts = sum(upset1$celltype=="Tfh2")
-##intersections
-Tfh1Genes <- upset1 %>% filter(celltype == "Tfh1") %>% pull(gene)
-Tfh1CMGenes <- upset1 %>% filter(celltype == "Tfh1CM") %>% pull(gene)
 
-Tfh1_n_Tfh1CM_genecounts <- length(intersect(Tfh1Genes, Tfh1CMGenes))
+# 1. Get unique gene lists for each group
+Tfh1Genes   <- unique(upset1 %>% filter(celltype == "Tfh1") %>% pull(gene))
+Tfh1CMGenes <- unique(upset1 %>% filter(celltype == "Tfh1CM") %>% pull(gene))
+Tfh2Genes   <- unique(upset1 %>% filter(celltype == "Tfh2") %>% pull(gene))
 
-##intersections
-Tfh1Genes <- upset1 %>% filter(celltype == "Tfh1") %>% pull(gene)
-Tfh2Genes <- upset1 %>% filter(celltype == "Tfh2") %>% pull(gene)
+# 2. Compute the disjoint sets (Venn regions)
 
-Tfh1_n_Tfh2_genecounts <- length(intersect(Tfh1Genes, Tfh2Genes))
-##intersections
-Tfh1CM_n_Tfh2_genecounts <- length(intersect(Tfh1CMGenes, Tfh2Genes))
-##intersections
-Tfh1_n_Tfh1CM_n_Tfh2_genecounts <- length(intersect(intersect(Tfh1Genes, Tfh1CMGenes), Tfh2Genes))
+# Triple intersection
+T1_T1CM_T2 <- Reduce(intersect, list(Tfh1Genes, Tfh1CMGenes, Tfh2Genes))
 
-# Input in the form of a named numeric vector
+# Pairwise only intersections (remove triple)
+T1_T1CM <- setdiff(intersect(Tfh1Genes, Tfh1CMGenes), T1_T1CM_T2)
+T1_T2   <- setdiff(intersect(Tfh1Genes, Tfh2Genes), T1_T1CM_T2)
+T1CM_T2 <- setdiff(intersect(Tfh1CMGenes, Tfh2Genes), T1_T1CM_T2)
+
+# Unique only
+T1_only   <- setdiff(Tfh1Genes, union(union(T1_T1CM, T1_T2), T1_T1CM_T2))
+T1CM_only <- setdiff(Tfh1CMGenes, union(union(T1_T1CM, T1CM_T2), T1_T1CM_T2))
+T2_only   <- setdiff(Tfh2Genes, union(union(T1_T2, T1CM_T2), T1_T1CM_T2))
+
+# 3. Construct named region vector for eulerr
 fit1 <- euler(c(
-  "Tfh1" = Tfh1_genecounts,
-  "Tfh1CM" = Tfh1CM_genecounts,
-  "Tfh2" = Tfh2_genecounts,
-  "Tfh1&Tfh1CM" = Tfh1_n_Tfh1CM_genecounts,
-  "Tfh1&Tfh2" = Tfh1_n_Tfh2_genecounts,
-  "Tfh1CM&Tfh2" = Tfh1CM_n_Tfh2_genecounts,
-  "Tfh1&Tfh1CM&Tfh2" = Tfh1_n_Tfh1CM_n_Tfh2_genecounts
+  "Tfh1"               = length(T1_only),
+  "Tfh1CM"             = length(T1CM_only),
+  "Tfh2"               = length(T2_only),
+  "Tfh1&Tfh1CM"        = length(T1_T1CM),
+  "Tfh1&Tfh2"          = length(T1_T2),
+  "Tfh1CM&Tfh2"        = length(T1CM_T2),
+  "Tfh1&Tfh1CM&Tfh2"   = length(T1_T1CM_T2)
 ))
 
-fill_colors <- c("#9e0142", "#fcc5c0", "#8c96c6")  # Replace with your desired colors
+# Optional: Custom colors
+fill_colors <- c("#9e0142", "#fcc5c0", "#8c96c6")  # Adjust if needed
 
-# Remove fills, vary borders, display quantities, and switch font.
-plot(
+# 4. Plot the Venn diagram with correct disjoint counts
+fig5b <- plot(
   fit1,
   quantities = TRUE,
   fill = fill_colors,
-  lty = 1, #solid lines for circles
+  lty = 1,
   labels = list(font = 4)
 )
+
+fig5b 
 ```
 
 #### Figure 5 C \| Expression of activation genes MKI67, CD38 and ICOS at day 16 in each Tfh subset compared to Day 0.
@@ -1785,16 +1977,16 @@ DefaultAssay(Tfh.16)
 ```
 
 ```{r Figure5C_Expression of activation genes MKI67, CD38 and ICOS at day 16 in each Tfh subset compared to Day 0, include=TRUE, warning=FALSE,fig.height= 4, fig.width=4, out.width="50%", fig.align='center'}
-
-log.data <- GetAssayData(Tfh.16[["RNA"]], layer = "data")
-Tfh.16_b <- SetAssayData(Tfh.16,
+Tfh.16_c <- subset(Tfh.16, alternative_clusters %in% c("Tfh1","Tfh1_CM", "Tfh2", "Tfh17") )
+log.data <- GetAssayData(Tfh.16_c[["RNA"]], layer = "data")
+Tfh.16_d <- SetAssayData(Tfh.16_c,
                        layer = "data",
                        new.data = log.data,
                        assay = "RNA")
 
 # Activation genes
 
-Stacked_VlnPlot(Tfh.16_b, features = c("MKI67", "CD38", "ICOS"), x_lab_rotate = TRUE,
+Stacked_VlnPlot(Tfh.16_d, features = c("MKI67", "CD38", "ICOS"), x_lab_rotate = TRUE,
                 group.by = "alternative_clusters", colors_use = Tfh_colors_list)
 
 ```
