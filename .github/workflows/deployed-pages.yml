@@ -19,8 +19,8 @@ jobs:
       - name: Copy subfolders to deploy root
         run: |
           mkdir public
-          cp -r code/supp_material/index.html public/supp_material/index.html
-          cp -r code/mainFig_material/index.html public/mainFig_material/index.html
+          cp -r code/supp_material/ public/supp_material/
+          cp -r code/mainFig_material/ public/mainFig_material/
           cp -r code/index.html public/index.html
 
 
