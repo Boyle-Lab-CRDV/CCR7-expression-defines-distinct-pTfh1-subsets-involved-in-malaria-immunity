@@ -1,6 +1,6 @@
-## CCR7 Expression Distinguishes Functionally Distinct pTfh1 Subsets with Roles in Malaria-Specific Immunity
+## Tfh2 and a subset of Tfh1 cells associate with antibody-mediated immunity to malaria
 
-Described in https://www.biorxiv.org/content/10.1101/2025.02.27.640479v1 
+Described in https://insight.jci.org/articles/view/196828 
 
 **[Raw data]** have been deposited in the NCBI data base under accession number GSE272939 (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE272939) and accession number GSE253661 (https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE253661)
 **[Input files]** for the analysis can be downloaded here (https://zenodo.org/records/14847353) 
